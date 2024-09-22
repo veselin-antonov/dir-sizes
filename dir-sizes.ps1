@@ -118,17 +118,26 @@ $max_name_length = 0
 $total_size = 0
 
 # Get a list of subdirectories and calculate their sizes
-Get-ChildItem -Path $TARGET_DIR -Directory | ForEach-Object {
+Get-ChildItem -Path $TARGET_DIR -Force | ForEach-Object {
 	$dir_name = $_.Name
+	
+	# Check if the item is a directory or a file
+    if ($_.PSIsContainer) {
+        # If it's a directory, prepend a slash
+        $dir_name = "/$dir_name"
+        $errors = @()
+
+        # Calculate the size of the directory contents
+		$dir_size = (Get-ChildItem -Path $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue -ErrorVariable errors | Measure-Object -Property Length -Sum).Sum
+    } else {
+        # If it's a file, just get its size directly
+        $dir_size = $_.Length
+    }
 	
 	# Update the maximum name length if the current directory name is longer
 	if ($dir_name.Length -gt $max_name_length) {
 		$max_name_length = $dir_name.Length
 	}
-	
-	$errors = @()
-	
-	$dir_size = (Get-ChildItem -Path $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue -ErrorVariable errors | Measure-Object -Property Length -Sum).Sum
 
 	$total_size += $dir_size
 
@@ -138,16 +147,24 @@ Get-ChildItem -Path $TARGET_DIR -Directory | ForEach-Object {
 	$color = Color-By-Size $dir_size
 	
 	if ($Debug) {
-		# Print the size immediately after calculation
-		$formatted_size = Convert-Size -bytes $dir_size
-		Write-Host "${dir_name}: ${formatted_size}" -ForegroundColor $color
-		
-		# Report any captured errors
-		if ($errors) {
-			Write-Host "    Skipped files:" -ForegroundColor DarkRed
-			foreach ($error in $errors) {
-				Write-Host "        $($error.TargetObject) - Access denied." -ForegroundColor DarkRed
-			}
+		if ($errors.Count -eq 1 -and $errors[0].Exception -is [System.UnauthorizedAccessException] -and $errors[0].TargetObject -eq $_.FullName) {
+			Write-Host "${dir_name}: Access Denied" -ForegroundColor DarkRed
+		} else {
+			# Print the size immediately after calculation
+			$formatted_size = Convert-Size -bytes $dir_size
+			Write-Host "${dir_name}: $formatted_size" -ForegroundColor $color
+			
+			# Report any captured errors
+			if ($errors) {
+				Write-Host "    Skipped files:" -ForegroundColor DarkRed
+				foreach ($error in $errors) {
+					if ($errors[0].Exception -is [System.UnauthorizedAccessException]) {
+						Write-Host "        $($error.TargetObject) - Access denied." -ForegroundColor DarkRed
+					} else {
+						Write-Host "        $($error.TargetObject) - $error"
+					}
+				}
+			}	
 		}
 	}
 }
